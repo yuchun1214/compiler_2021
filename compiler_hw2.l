@@ -29,6 +29,7 @@ newline		[\n]
 <CMT>\n     {;}
 <CMT>.      {;}
 "//".*      {;}
+
 "\""        { BEGIN(STR);
                 return '"';
             }
@@ -51,7 +52,7 @@ newline		[\n]
 "<="        { return LEQ; }
 "=="        { return EQ; }
 "!="        { return NEQ; }
-"="         { return EQ; }
+"="         { return '='; }
 "+="        { return ADD_ASSIGN; }
 "-="        { return SUB_ASSIGN; }
 "*="        { return MUL_ASSIGN; }
@@ -62,17 +63,27 @@ newline		[\n]
 "("         { return '('; }
 ")"         { return ')'; }
 "!"         { return NOT;}
+"{"         { return '{'; }
+"}"         { return '}'; }
+"["         { return '['; }
+"]"         { return ']'; }
 
 "print"     { return PRINT; }
 "int"       { return INT;}
 "float"     { return FLOAT;}
 "bool"      { return BOOL; }
+"string"    { return STRING; }
 "true"      { return TRUE; }
 "false"     { return FALSE; }
+"while"     { return WHILE; }
+"for"       { return FOR; }
+"if"        { return IF; }
+"else"      { return ELSE; }
 
 {inumber}   { yylval.i_val = atoi(yytext);
                 return INT_LIT;
             }
+{fnumber}   { yylval.f_val = atof(yytext); return FLOAT_LIT; }
 
 {id}        { yylval.ctr.id_name = strdup(yytext);
                 return IDENT;

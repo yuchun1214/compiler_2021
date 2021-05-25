@@ -1,6 +1,9 @@
 /*	Definition section */
 %{
     #include "common.h" //Extern variables that communicate with lex
+    
+    #define TYPE_AMOUNT 4
+
     // #define YYDEBUG 1
     // int yydebug = 1;
 
@@ -11,58 +14,70 @@
     void yyerror (char const *s)
     {
         printf("error:%d: %s\n", yylineno, s);
-   
     }
 
     struct operator_t{
         char * _name;
         int _precedence;
+        bool _is_unary;
+    };
+
+    struct symtb_entry_t{
+        int _idx;
+        char * _name;
+        char * _type;
+        int _address;
+        int _line_no;
+        char * _element_type;
+        int _scope;
     };
 
     struct stack_t{
         int _idx;
         int _capacity;
-        struct operator_t * _operators;
+        void * _entries;
+        void * _ptr_parent_object;
+    };
+
+    struct symbol_table_t{
+        int _current_scope;
+        int _address;
+        struct stack_t _symbols;
     };
    
-    bool initialize_stack(struct stack_t * stack);
-    bool push(struct stack_t * stack, char *oper, int prec);
-    void pop(struct stack_t *stack);
-
-    int precedence(struct operator_t * opers, int r1, int r2, char * name);
+    bool initialize_operator_stack(struct stack_t * stack);
     
+    bool push_operator(
+            struct stack_t *operators_stack, 
+            struct stack_t * operands_stack, 
+            char *name, 
+            int prec, 
+            bool is_unary
+        );
 
-    struct stack_t stack;
-    // struct entry_t{
-    //     unsigned int _index;
-    //     char * _name;
-    //     char * _type;
-    //     unsigned int _address;
-    //     unsigned int _lineno;
-    //     char * _element_type;
-    // };
-    // 
-    // struct symbol_table_t{
-    //     struct entry_t * _entries;
-    //     unsigned int _size;
-    //     unsigned int _level;
-    // };
+    void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_stack);
+    char * pop_operators(struct stack_t *operators_stack, struct stack_t * operands_stack);
 
-    // struct stack_t{
-    //     struct symbol_table_t * _tables;
-    //     unsigned int _size;
-    //     unsigned int _capacity;
-    // }; 
-    // struct stack_t stack;
+    bool initialize_operand_stack(struct stack_t *stack);
+    bool push_operand(struct stack_t *stack, char * type);
+    void pop_operands(struct stack_t *stack);
+    void pop_operand(struct stack_t *stack);
 
-    
-    /* Symbol table function - you can add new function if needed. */
-    
-    // static void initialize_stack(struct stack_t *stack);
-    // static void create_symbol_table(struct stack_t *stack);
-    // static void insert_symbol(/* ... */);
-    // static void lookup_symbol(/* ... */);
-    // static void dump_symbol_table(/* ... */);
+    bool initialize_symbol_stack(struct stack_t * stack);
+    bool initialize_symbol_table(struct symbol_table_t * table);
+    void insert_symbol(struct symbol_table_t * table, char *name, char *type, int line_no, char * element_type);
+    int lookup_symbol(struct symbol_table_t * table, char *name);
+    void new_scope(struct symbol_table_t * table);
+    void delete_scope(struct symbol_table_t * table);
+    char * get_operand_type(struct symbol_table_t * table, char *name);
+
+    struct stack_t operators_stack;
+    struct stack_t operands_stack;
+    struct symbol_table_t table;
+
+    char TYPE[TYPE_AMOUNT][6] = {
+        "string", "bool", "int", "float"
+    };
 %}
 
 %error-verbose
@@ -82,10 +97,8 @@
 }
 
 /* Token without return */
-%token INT FLOAT BOOL STRING
 %token SEMICOLON
 %token PRINT
-%token IDENT
 %token ADD_ASSIGN SUB_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
 %token OR AND
 %token EQ NEQ LSL LEQ GTR GEQ
@@ -94,17 +107,23 @@
 %token POS NEG NOT
 %token INC DEC
 %token TRUE FALSE
+%token INT FLOAT BOOL STRING
+%token WHILE FOR
+%token IF ELSE
 
 
 /* Token with return, which need to sepcify type */
 %token <i_val> INT_LIT
 %token <f_val> FLOAT_LIT
 %token <s_val> STRING_LIT
+%token <s_val> IDENT
 
 
 
 /* Nonterminal with return, which need to sepcify type */
-%type <s_val> cmp_op add_op mul_op unary_op
+%type <s_val> cmp_op add_op mul_op unary_op assign_op
+%type <s_val> Literal
+%type <s_val> Type TypeName
 
 /* Yacc will start at this nonterminal */
 %start Program
@@ -113,7 +132,7 @@
 %%
 
 Program
-    : StatementList
+    : StatementList { delete_scope(&table); }
 ;
 
 StatementList
@@ -122,23 +141,77 @@ StatementList
 ;
 
 Type
-    : TypeName
+    : TypeName { $$ = $1; }
 ;
 
 TypeName
-    : INT
-    | FLOAT
-    | STRING
-    | BOOL
+    : INT { $$ = "int";}
+    | FLOAT { $$ = "float"; }
+    | STRING { $$ = "string"; }
+    | BOOL   { $$ = "bool"; }
 ;
 
 
-
 Statement
-    : DeclarationStmt { printf("DeclarationStmt\n"); }
-	| AssignmentStmt  { printf("AssignmentStmt\n");  }
-    | ArithmeticStmt  { printf("ArithmeticStmt\n");  }
-    | PrintStmt { pop(&stack); }
+    : DeclarationStmt { }
+	| AssignmentStmt  { pop_operators(&operators_stack, &operands_stack); }
+    | ArithmeticStmt  { pop_operators(&operators_stack, &operands_stack); }
+    | PrintStmt { printf("PRINT %s\n", pop_operators(&operators_stack, &operands_stack)); }
+    | Block
+    | WhileStmt
+    | ForStmt
+    | IfStmt
+;
+
+IfStmt
+    : IF Condition Block
+    | IF Condition Block ELSE
+    | IF Condition Block ELSE IfStmt
+;
+    
+
+WhileStmt
+    : WHILE '(' Condition ')' Block
+;
+
+ForStmt
+    : FOR '(' ForClause ')' Block
+;
+
+ForClause
+    : InitStmt SEMICOLON Condition SEMICOLON PostStmt  { pop_operators(&operators_stack, &operands_stack); }
+;
+
+Condition
+    : Expression { pop_operators(&operators_stack, &operands_stack); /*Expression check if bool type*/}
+    | BOOL_LIT
+;
+
+InitStmt
+    : SimpleExpr
+;
+
+PostStmt
+    : SimpleExpr
+;
+
+SimpleExpr
+    : AssignmentExpr
+    | Expression
+    | UnaryExpr
+;
+
+
+Block
+    : LBBlock StatementList RBBlock { }
+;
+
+LBBlock
+    : '{' { new_scope(&table); }
+;
+
+RBBlock
+    : '}' { delete_scope(&table); }
 ;
 
 Expression
@@ -148,45 +221,45 @@ Expression
 
 UnaryExpr
 	: PrimaryExpr
-	| unary_op UnaryExpr { push(&stack, $1, 5); }
-    | INC UnaryExpr
-    | DEC UnaryExpr
-    | UnaryExpr INC
-    | UnaryExpr DEC
+	| unary_op UnaryExpr { push_operator(&operators_stack, &operands_stack, $1, 5, true); }
+    | INC UnaryExpr  { push_operator(&operators_stack, &operands_stack, "INC", 5, true); }
+    | DEC UnaryExpr{ push_operator(&operators_stack, &operands_stack, "DEC", 5, true); }
+    | UnaryExpr INC { push_operator(&operators_stack, &operands_stack, "INC", 5, true); }
+    | UnaryExpr DEC { push_operator(&operators_stack, &operands_stack, "DEC", 5, true); }
 ;
 
 PrimaryExpr
 	: Operand
-	| IndexExpr
+	| IndexExpr 
 	| ConversionExpr
 ;
 
 Operand
-	: Literal
-	| IDENT
+	: Literal { push_operand(&operands_stack, $1); }
+	| IDENT   { push_operand(&operands_stack, get_operand_type(&table,$1)); }
 	| LPExpression Expression RPExpression
 ;
 
 LPExpression
-    : '('    {  push(&stack, "LP", -1); }
+    : '('    {  push_operator(&operators_stack, &operands_stack, "LP", -1, false); }
 ;
 
 RPExpression
-    : ')'    { pop(&stack);}
+    : ')'    { pop_operators(&operators_stack, &operands_stack);}
 ;
 
 binary_op
-	: OR       { push(&stack, "OR", 0); }
-	| AND      { push(&stack, "AND", 1); }
-	| cmp_op   { push(&stack, $1, 2); }
-	| add_op   { push(&stack, $1, 3); }
-	| mul_op   { push(&stack, $1, 4); }
+	: OR       { push_operator(&operators_stack, &operands_stack,  "OR", 0, false); } 
+	| AND      { push_operator(&operators_stack, &operands_stack,  "AND", 1, false); }
+	| cmp_op   { push_operator(&operators_stack, &operands_stack,  $1, 2, false); }
+	| add_op   { push_operator(&operators_stack, &operands_stack,  $1, 3, false); }
+	| mul_op   { push_operator(&operators_stack, &operands_stack,  $1, 4, false); }
 ;
 
 cmp_op
-	: EQ       { $$ = "EQ"; }
+	: EQ       { $$ = "EQL"; }
 	| NEQ      { $$ = "NEQ"; }
-	| LSL      { $$ = "LSL"; }
+	| LSL      { $$ = "LSS"; }
 	| LEQ      { $$ = "LEQ"; }
 	| GTR      { $$ = "GTR"; }
 	| GEQ      { $$ = "GEQ"; }
@@ -222,22 +295,26 @@ PrintStmt
 Literal
     : INT_LIT {
         printf("INT_LIT %d\n", $<i_val>$);
+        $$ = "int";
     }
     | FLOAT_LIT {
         printf("FLOAT_LIT %f\n", $<f_val>$);
+        $$ = "float";
     }
-    | STRING_LIT {
-        printf("STRING_LIT %s\n", $<s_val>$);
+    | '"' STRING_LIT '"' {
+        printf("STRING_LIT %s\n", $2);
+        $$ = "string";
     }
-    | BOOL_LIT
+    | BOOL_LIT { $$ = "bool"; }
 ;
 
 BOOL_LIT
     : TRUE { printf("TRUE\n"); }
     | FALSE { printf("FALSE\n"); }
 
+
 IndexExpr
-	: PrimaryExpr '[' Expression ']'
+	: PrimaryExpr '[' Expression ']' { pop_operators(&operators_stack, &operands_stack); pop_operand(&operands_stack);  }
 ;
 
 ConversionExpr
@@ -245,13 +322,13 @@ ConversionExpr
 	
 
 DeclarationStmt
-	: Type IDENT SEMICOLON { printf("ID : %s, type\n", yylval.ctr.id_name);}
-	| Type IDENT '='Expression SEMICOLON 
-	| Type IDENT '[' Expression ']' SEMICOLON
+	: Type IDENT SEMICOLON { insert_symbol(&table, $2, $1, yylineno, "-"); }
+	| Type IDENT '=' Expression SEMICOLON  { insert_symbol(&table, $2, $1, yylineno, "-");  pop_operators(&operators_stack, &operands_stack); pop_operands(&operands_stack); }
+	| Type IDENT '[' Expression ']' SEMICOLON { insert_symbol(&table, $2, "array", yylineno, $1); pop_operators(&operators_stack, &operands_stack); pop_operands(&operands_stack); }
 ;
 
 AssignmentExpr
-	: Expression assign_op Expression
+	: Expression assign_op Expression { pop_operators(&operators_stack, &operands_stack); printf("%s\n", $2);}
 ;
 
 AssignmentStmt
@@ -259,95 +336,247 @@ AssignmentStmt
 ;
 
 assign_op
-	: '=' 
-	| ADD_ASSIGN
-	| SUB_ASSIGN
-	| MUL_ASSIGN
-	| DIV_ASSIGN
-	| MOD_ASSIGN
+	: '='   { $$ = "ASSIGN"; }
+	| ADD_ASSIGN { $$ = "ADD_ASSIGN"; }
+	| SUB_ASSIGN { $$ = "SUB_ASSIGN"; }
+	| MUL_ASSIGN { $$ = "MUL_ASSIGN"; }
+	| DIV_ASSIGN { $$ = "QUO_ASSIGN"; }
+	| MOD_ASSIGN { $$ = "REM_ASSIGN"; }
 ;
-
 %%
 
-bool initialize_stack(struct stack_t *stack){
+bool initialize_symbol_stack(struct stack_t * stack){
+    _initialize_stack(stack, struct symtb_entry_t);
+    return (stack->_entries) ? true : false;
+}
+
+bool initialize_symbol_table(struct symbol_table_t * table){
+    table->_current_scope = 0;
+    table->_address = 0;
+    int retval = initialize_symbol_stack(&table->_symbols);
+    table->_symbols._ptr_parent_object = table;
+    return retval;
+}
+
+bool initialize_operand_stack(struct stack_t *stack){
+    _initialize_stack(stack, char *);
+    return (stack->_entries) ? true : false;
+}
+
+bool push_operand(struct stack_t *stack, char * type){
+    _stack_push(stack, char *, type);
+    return (stack->_entries) ? true : false;
+}
+
+void pop_operands(struct stack_t *stack){
     stack->_idx = 0;
-    stack->_capacity = 100;
-    stack->_operators = (struct operator_t *)malloc(sizeof(struct operator_t)*100);
-    return (stack->_operators) ? true : false;
 }
 
-bool realloc_stack(struct stack_t * stack){
-    stack->_operators = realloc(stack->_operators, sizeof(struct operator_t) * (stack->_capacity += 100));
-    return stack->_operators ? true : false;
+void pop_operand(struct stack_t *stack){
+    _stack_pop(stack);
 }
 
+bool initialize_operator_stack(struct stack_t *stack){
+    _initialize_stack(stack, struct operator_t);
+    return (stack->_entries) ? true : false;
+}
 
-// perform faulty binary search algorithm
-int precedence(struct operator_t * opers, int r1, int r2, char * name){
-    int mid = (r1 + r2) / 2.0;
-    int retval = strcmp(name, opers[mid]._name);
-    if(retval == 0){
-        return opers[mid]._precedence;
-    } else if(retval > 0) {
-        return precedence(opers, mid, r2, name);    
-    } else{
-        return precedence(opers, r1, mid, name);
+int check_type(char *operand){
+    if(operand){
+        for (int i = 0; i < TYPE_AMOUNT; ++i){
+            if(strncmp(operand, TYPE[i], 3) == 0){
+                return i;
+            }
+        }
+    }
+    
+    return -1;
+}
+
+char * get_type(int index){
+    if(index > 0 && index < TYPE_AMOUNT){
+        return TYPE[index];
+    }
+    return NULL;
+}
+
+char * get_operand_type(struct symbol_table_t * table, char *name){
+    int index = lookup_symbol(table, name);
+    if(index >= 0){
+        struct stack_t * stack = &(table->_symbols);
+        struct symtb_entry_t entry = _stack_get(stack, struct symtb_entry_t, index);
+        printf("IDENT (name=%s, address=%d)\n", entry._name, entry._address);
+        if(strcmp(entry._type, "array") == 0){
+            return entry._element_type;
+        }
+        return entry._type;
+    } else {
+        printf("error:%d: undefined variable %s\n", yylineno, name);
+        return NULL; 
     }
 }
 
-bool push(struct stack_t * stack, char * oper, int prec){
-    // printf("push! oper is %s, prec is %u\n", oper, prec);
-    
+bool push_operator(struct stack_t * operators_stack, struct stack_t * operands_stack,  char * oper, int prec, bool is_unary){
     int i = 0;
+    struct operator_t top;
+    
     if(prec >= 0){
-        for(i = stack->_idx - 1; i >= 0; --i){
-            if(stack->_operators[i]._precedence >= prec){
-                printf("%s\n", stack->_operators[i]._name); 
+        for(i = operators_stack->_idx - 1; i >= 0; --i){
+            top = _stack_top(operators_stack, struct operator_t);
+            if(top._precedence >= prec){
+                printf("%s\n", top._name); 
+                pop_operator(operators_stack, operands_stack);
             }else
                 break;
         }
-        stack->_idx = i + 1;
     }
 
-    if(stack->_idx + 1 > stack->_capacity){
-        realloc_stack(stack);
-        if(!stack->_operators) return false;
-    }
-
-    stack->_operators[stack->_idx]._name = oper;
-    stack->_operators[stack->_idx]._precedence = prec;
-    stack->_idx += 1;
+    top._name = oper;
+    top._precedence = prec;
+    top._is_unary = is_unary;
+    _stack_push(operators_stack, struct operator_t, top); 
     return true;
 }
 
-void pop(struct stack_t * stack){
-    // printf("pop!!\n");
-    char * text;
-    int i;
-    for(i = stack->_idx - 1; i >= 0; --i){
-        text = stack->_operators[i]._name;
-        if(strcmp(text, "LP") == 0)
-            break;
-        printf("%s\n", stack->_operators[i]._name);
-    }
-    
-    stack->_idx = (i > 0) ? i : 0;
+void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_stack){
+    struct operator_t operator_top;
+    operator_top = _stack_top(operators_stack, struct operator_t);
+    int type1, type2, type;
+    char * operand1, *operand2, *operand;
+
+    if(!operator_top._is_unary){ // operator is binary, pop two operands
+        operand1 = _stack_top(operands_stack, char *);
+        type1 = check_type(operand1);
+        _stack_pop(operands_stack);
+
+        operand2 = _stack_top(operands_stack, char *);
+        type2 = check_type(operand2);
+        _stack_pop(operands_stack);
+        if(operator_top._precedence >= 3){ // arithmetic, add_op, mul_op
+            if (type1 >= 2 && type2 >= 2) // type1 and type2 is int or float
+                   type = type1 > type2 ? type1 : type2;           
+             else if ( type1 == type2) 
+                type = type1;
+             else if( type1 < 0 || type2 < 0){
+                type = -1;
+                // yyerror("Semantic Error : type error!");  
+             }
+            // if( type1 < 0 || type2 < 0){
+            //     type = -1;
+            // }else if (type != type2){
+            //        
+            // }
+            
+        } else if(operator_top._precedence == 2){ // cmp_op
+            // operand1 and operand2 should be int or float
+            if(type1 >= 2 && type2 >= 2)
+                type = 1; // type is bool
+            else
+                type = -1;
+                // yyerror("Semantic Error : type error!");
+        } else { // AND OR
+            if(type1 != 1 && type2 != 1)
+                yyerror("Semantic Error : type error!");
+            type = 1;
+        }
+        
+       operand = get_type(type);
+       _stack_push(operands_stack, char *, operand); // push back
+    } 
+    _stack_pop(operators_stack);
 }
 
-// static void initialize_stack(struct stack_t *stack){
-//     printf("Initialize stack\n");
-//     stack->_tables = (struct symbol_table_t *)malloc(sizeof(struct symbol_table_t) * 100);
-//     stack->_capacity = 100;
-//     stack->_size = 0;
-// }
-// 
-// static void create_symbol_table(struct stack_t *stack){
-//     printf("create symbol table\n");
-//     if(stack->_size + 1 > stack->_capacity){
-//         stack->_tables = realloc(stack->_tables, sizeof(struct symbol_table_t) * (stack->_capacity += 100));
-//     }
-// }
+char * pop_operators(struct stack_t * operators_stack, struct stack_t * operands_stack){
+    struct operator_t top;
+    while(operators_stack->_idx){
+        top = _stack_top(operators_stack, struct operator_t);
+        if(strcmp(top._name, "LP") == 0){
+            operators_stack->_idx -= 1;
+            break;
+        }
+        printf("%s\n", top._name);
+        pop_operator(operators_stack, operands_stack);
+    }
 
+    char * type = _stack_top(operands_stack,char *);
+    // printf("type = %s\n", type);
+    
+    return (type == NULL ? "" : type);
+}
+
+
+void new_scope(struct symbol_table_t * table){
+    table->_current_scope += 1;
+}
+
+void delete_scope(struct symbol_table_t * table){
+    int scope_level = table->_current_scope;
+    table->_current_scope -= 1;
+    printf("> Dump symbol table (scope level: %d)\n", scope_level);
+    printf("%-10s%-10s%-10s%-10s%-10s%s\n", "Index", "Name", "Type", "Address", "Lineno",
+    "Element type");
+    struct stack_t * stack = &(table->_symbols);
+    struct symtb_entry_t entry;
+    int pop_amount = 0;
+    for(int i = 0; i < table->_symbols._idx; ++i){
+        entry = _stack_get(stack, struct symtb_entry_t, i);
+        if(entry._scope == scope_level){
+            pop_amount += 1;
+            printf("%-10d%-10s%-10s%-10d%-10d%s\n", entry._idx, entry._name, entry._type, entry._address, entry._line_no, entry._element_type);
+        }
+    } 
+    table->_symbols._idx -= pop_amount;
+}
+
+void insert_symbol(struct symbol_table_t * table, char *name, char *type, int line_no, char * element_type){
+    struct symtb_entry_t top;
+    struct symtb_entry_t entry;
+    struct stack_t * stack = &(table->_symbols);
+    
+    // check if re-define symbol
+    int retval = lookup_symbol(table, name);
+    if (retval >= 0){
+        entry = _stack_get(stack, struct symtb_entry_t, retval);
+        if(entry._scope == table->_current_scope){
+            yyerror("Error : re-define symbol\n");
+            return ;
+        }
+    }
+
+    if(table->_symbols._idx == 0){ // stack is empty
+        entry._idx = 0; 
+    } else { // stack isn't empty
+        top = _stack_top(stack, struct symtb_entry_t);
+        if( top._scope != table->_current_scope){
+            entry._idx = 0;
+        }else
+            entry._idx = top._idx + 1;
+    }
+
+    entry._name = name;
+    entry._type = type;
+    entry._address = table->_address;
+    entry._line_no = line_no;
+    entry._element_type = element_type;
+    entry._scope = table->_current_scope;
+    printf("> Insert {%s} into symbol table (scope level: %d)\n", entry._name, entry._scope);
+    table->_address += 1;
+    _stack_push(stack, struct symtb_entry_t, entry);
+}
+
+int lookup_symbol(struct symbol_table_t * table, char *name){
+    int idx = table->_symbols._idx;
+    struct symtb_entry_t entry;
+    struct stack_t * stack = &(table->_symbols);
+    for(int i = idx - 1; i >= 0; --i){
+        entry = _stack_get(stack, struct symtb_entry_t, i);
+        if(strcmp(entry._name, name) == 0){
+            return i;
+        }
+    }
+
+    return -1;
+}
 
 /* C code section */
 int main(int argc, char *argv[])
@@ -358,8 +587,14 @@ int main(int argc, char *argv[])
         yyin = stdin;
     }
 
-    bool retval = initialize_stack(&stack);
-    
+    // TYPE = {
+    //    "string", "bool", "int", "float"
+    // };
+
+
+    bool retval = initialize_operator_stack(&operators_stack);
+    retval &= initialize_operand_stack(&operands_stack); 
+    retval &= initialize_symbol_table(&table);
 
     if (!retval)
         exit(-1);
