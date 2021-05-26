@@ -72,6 +72,8 @@
     void delete_scope(struct symbol_table_t * table);
     char * get_operand_type(struct symbol_table_t * table, char *name);
 
+    void assignment(struct stack_t* operands_stack, char * operator);
+
     struct stack_t operators_stack;
     struct stack_t operands_stack;
     struct symbol_table_t table;
@@ -330,7 +332,7 @@ DeclarationStmt
 ;
 
 AssignmentExpr
-	: Expression assign_op Expression { pop_operators(&operators_stack, &operands_stack); printf("%s\n", $2);}
+	: Expression assign_op Expression { pop_operators(&operators_stack, &operands_stack); assignment(&operands_stack, $2);}
 ;
 
 AssignmentStmt
@@ -454,33 +456,55 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
         operand2 = _stack_top(operands_stack, char *);
         type2 = check_type(operand2);
         _stack_pop(operands_stack);
-        if(operator_top._precedence >= 3){ // arithmetic, add_op, mul_op
-            if (type1 >= 2 && type2 >= 2) // type1 and type2 is int or float
-                   type = type1 > type2 ? type1 : type2;           
-             else if ( type1 == type2) 
-                type = type1;
-             else if( type1 < 0 || type2 < 0){
-                type = -1;
-                // yyerror("Semantic Error : type error!");  
-             }
-            // if( type1 < 0 || type2 < 0){
-            //     type = -1;
-            // }else if (type != type2){
-            //        
-            // }
-            
-        } else if(operator_top._precedence == 2){ // cmp_op
-            // operand1 and operand2 should be int or float
-            if(type1 >= 2 && type2 >= 2)
-                type = 1; // type is bool
-            else
-                type = -1;
-                // yyerror("Semantic Error : type error!");
-        } else { // AND OR
-            if(type1 != 1 && type2 != 1)
-                yyerror("Semantic Error : type error!");
-            type = 1;
+        switch(operator_top._precedence){
+            case 4: // mul_op
+                if(strcmp(operator_top._name, "REM") == 0){
+                    if(type1 == 3 || type2 == 3){
+                        printf("error:%d: invalid operation: (operator REM not defined on float)\n");
+                    }
+                }
+                break;    
+            case 3: // add_op
+                if(type1 < 0 || type2 < 0 || type1 != type2){
+                    type = -1;
+                    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator_top._name, operand1, operand2);
+                } else { //(type1 == type2)
+                    type = type1;
+                }
+                break;
+            default:
+                break;
+
         }
+        // if(operator_top._precedence == 3){ // arithmetic, add_op, mul_op
+        //     // if (type1 >= 2 && type2 >= 2) // type1 and type2 is int or float
+        //     //        type = type1 > type2 ? type1 : type2;           
+        //     // else if ( type1 == type2) 
+        //     //     type = type1;
+        //     // else if( type1 < 0 || type2 < 0){
+        //     //     type = -1;
+        //     //     // yyerror("Semantic Error : type error!");  
+        //     // }
+        //     if( ){
+        //         type = -1;
+        //     }else if (type != type2){
+        //            
+        //     }
+        //     
+        // } else if (operator_top._precedenc == 4) { 
+        //     
+        // }else if(operator_top._precedence == 2){ // cmp_op
+        //     // operand1 and operand2 should be int or float
+        //     if(type1 >= 2 && type2 >= 2)
+        //         type = 1; // type is bool
+        //     else
+        //         type = -1;
+        //         // yyerror("Semantic Error : type error!");
+        // } else { // AND OR
+        //     if(type1 != 1 && type2 != 1)
+        //         yyerror("Semantic Error : type error!");
+        //     type = 1;
+        // }
         
        operand = get_type(type);
        _stack_push(operands_stack, char *, operand); // push back
@@ -578,6 +602,17 @@ int lookup_symbol(struct symbol_table_t * table, char *name){
     }
 
     return -1;
+}
+
+void assignment(struct stack_t * operands_stack, char * operator){
+    char * op1, *op2;
+    op1 = _stack_get(operands_stack, char *, 0);
+    op2 = _stack_get(operands_stack, char *, 1);
+    if(strcmp(op1, op2) != 0){
+        printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator, op1, op2);
+    }
+    printf("%s\n", operator);
+    pop_operands(operands_stack);
 }
 
 void conversion(struct stack_t * operands_stack, char * new_type){
