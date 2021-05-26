@@ -1,7 +1,8 @@
 /*	Definition section */
 %{
     #include "common.h" //Extern variables that communicate with lex
-    
+    // printf("type = %s\n", type);
+   
     #define TYPE_AMOUNT 4
 
     // #define YYDEBUG 1
@@ -44,6 +45,11 @@
         int _address;
         struct stack_t _symbols;
     };
+
+	struct operand_t{
+		bool _is_literal;
+		char * _type;
+	};
    
     bool initialize_operator_stack(struct stack_t * stack);
     
@@ -59,7 +65,7 @@
     char * pop_operators(struct stack_t *operators_stack, struct stack_t * operands_stack);
 
     bool initialize_operand_stack(struct stack_t *stack);
-    bool push_operand(struct stack_t *stack, char * type);
+    bool push_operand(struct stack_t *stack, char * type, bool is_literal);
     void pop_operands(struct stack_t *stack);
     void pop_operand(struct stack_t *stack);
     void conversion(struct stack_t *operands_stack, char * new_type);
@@ -239,8 +245,8 @@ PrimaryExpr
 ;
 
 Operand
-	: Literal { push_operand(&operands_stack, $1); }
-	| IDENT   { push_operand(&operands_stack, get_operand_type(&table,$1)); }
+	: Literal { push_operand(&operands_stack, $1, true); }
+	| IDENT   { push_operand(&operands_stack, get_operand_type(&table,$1), false); }
 	| LPExpression Expression RPExpression
 ;
 
@@ -368,8 +374,11 @@ bool initialize_operand_stack(struct stack_t *stack){
     return (stack->_entries) ? true : false;
 }
 
-bool push_operand(struct stack_t *stack, char * type){
-    _stack_push(stack, char *, type);
+bool push_operand(struct stack_t *stack, char * type, bool is_literal){
+	struct operand_t operand;
+	operand._type = type;
+	operand._is_literal = is_literal;
+    _stack_push(stack, struct operand_t, operand);
     return (stack->_entries) ? true : false;
 }
 
@@ -416,7 +425,7 @@ char * get_operand_type(struct symbol_table_t * table, char *name){
         }
         return entry._type;
     } else {
-        printf("error:%d: undefined variable %s\n", yylineno, name);
+        printf("error:%d: undefined: %s\n", yylineno, name);
         return NULL; 
     }
 }
@@ -448,15 +457,16 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
     struct operator_t operator_top;
     operator_top = _stack_top(operators_stack, struct operator_t);
     int type1, type2, type;
-    char * operand1, *operand2, *operand;
+    // char * operand1, *operand2, *operand;
+	struct operand_t operand1, operand2, operand;
 
     if(!operator_top._is_unary){ // operator is binary, pop two operands
-        operand1 = _stack_top(operands_stack, char *);
-        type1 = check_type(operand1);
+        operand1 = _stack_top(operands_stack, struct operand_t);
+        type1 = check_type(operand1._type);
         _stack_pop(operands_stack);
 
-        operand2 = _stack_top(operands_stack, char *);
-        type2 = check_type(operand2);
+        operand2 = _stack_top(operands_stack, struct operand_t);
+        type2 = check_type(operand2._type);
         _stack_pop(operands_stack);
         switch(operator_top._precedence){
             case 4: // mul_op
@@ -472,7 +482,7 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
             case 3: // add_op
                 if(type1 < 0 || type2 < 0 || type1 != type2){
                     type = -1;
-                    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator_top._name, operand2, operand1);
+                    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator_top._name, operand2._type, operand1._type);
                 } else { //(type1 == type2)
                     type = type1;
                 }
@@ -481,7 +491,7 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
 			case 1:
 				if(type1 != 1 || type2 != 1){
 					type = -1;
-					printf("error:%d: invalid operation: (operator %s not defined on %s)\n", yylineno, operator_top._name, type1 != 1 ? operand1 : operand2);
+					printf("error:%d: invalid operation: (operator %s not defined on %s)\n", yylineno, operator_top._name, type1 != 1 ? operand1._type : operand2._type);
 				}else 
 					type = 1;
                 break;
@@ -519,8 +529,9 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
         //     type = 1;
         // }
         
-       operand = get_type(type);
-       _stack_push(operands_stack, char *, operand); // push back
+       operand._type = get_type(type);
+	   operand._is_literal = true;
+       _stack_push(operands_stack, struct operand_t, operand); // push back
     } 
     _stack_pop(operators_stack);
 }
@@ -536,11 +547,10 @@ char * pop_operators(struct stack_t * operators_stack, struct stack_t * operands
         pop_operator(operators_stack, operands_stack);
         printf("%s\n", top._name);
     }
-
-    char * type = _stack_top(operands_stack,char *);
-    // printf("type = %s\n", type);
+	struct operand_t operand;
+    operand  = _stack_top(operands_stack, struct operand_t);
     
-    return (type == NULL ? "" : type);
+    return (operand._type == NULL ? "" : operand._type);
 }
 
 
@@ -577,7 +587,7 @@ void insert_symbol(struct symbol_table_t * table, char *name, char *type, int li
     if (retval >= 0){
         entry = _stack_get(stack, struct symtb_entry_t, retval);
         if(entry._scope == table->_current_scope){
-            yyerror("Error : re-define symbol\n");
+			printf("error:%d: %s redeclared in this block. previous declaration at line %d\n", yylineno, name, entry._line_no);
             return ;
         }
     }
@@ -619,24 +629,32 @@ int lookup_symbol(struct symbol_table_t * table, char *name){
 
 void assignment(struct stack_t * operands_stack, char * operator){
     char * op1, *op2;
-    op1 = _stack_get(operands_stack, char *, 0);
-    op2 = _stack_get(operands_stack, char *, 1);
-    if(strcmp(op1, op2) != 0){
+	struct operand_t operand1, operand2;
+    operand1 = _stack_get(operands_stack, struct operand_t, 0);
+    operand2 = _stack_get(operands_stack, struct operand_t, 1);
+	op1 = operand1._type;
+	op2 = operand2._type;
+    if(op1 && op2 && strcmp(op1, op2) != 0){
         printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator, op1, op2);
-    }
+    } else if(operand1._is_literal){
+		printf("error:%d: cannot assign to %s\n",yylineno, op1);	
+	}
     printf("%s\n", operator);
     pop_operands(operands_stack);
 }
 
 void conversion(struct stack_t * operands_stack, char * new_type){
-    char * top = _stack_top(operands_stack, char *);
-    printf("%C to %C\n", top[0] ^ 0x20, new_type[0] ^ 0x20);
+    struct operand_t top = _stack_top(operands_stack, struct operand_t);
+    printf("%C to %C\n", top._type[0] ^ 0x20, new_type[0] ^ 0x20);
     pop_operand(operands_stack);
-    push_operand(operands_stack, new_type);
+	top._type = new_type;
+    push_operand(operands_stack, new_type, top._is_literal);
 }
 
 void condition(struct stack_t * operands_stack){
-	char * top = _stack_top(operands_stack, char *);
+	struct operand_t operand;
+	operand = _stack_top(operands_stack, struct operand_t);
+	char * top = operand._type;
 	if(strcmp(top, "bool") != 0){
 		printf("error:%d: non-bool (type %s) used as for condition\n", yylineno + 1, top);	
 	}
