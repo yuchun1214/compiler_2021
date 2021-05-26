@@ -62,6 +62,7 @@
     bool push_operand(struct stack_t *stack, char * type);
     void pop_operands(struct stack_t *stack);
     void pop_operand(struct stack_t *stack);
+    void conversion(struct stack_t *operands_stack, char * new_type);
 
     bool initialize_symbol_stack(struct stack_t * stack);
     bool initialize_symbol_table(struct symbol_table_t * table);
@@ -318,7 +319,8 @@ IndexExpr
 ;
 
 ConversionExpr
-	: Type '(' Expression ')'
+	: Type '(' Expression ')'        { conversion(&operands_stack, $1) ; }
+    | '(' Type ')' Expression {}     { conversion(&operands_stack, $2); }
 	
 
 DeclarationStmt
@@ -576,6 +578,13 @@ int lookup_symbol(struct symbol_table_t * table, char *name){
     }
 
     return -1;
+}
+
+void conversion(struct stack_t * operands_stack, char * new_type){
+    char * top = _stack_top(operands_stack, char *);
+    printf("%C to %C\n", top[0] ^ 0x20, new_type[0] ^ 0x20);
+    pop_operand(operands_stack);
+    push_operand(operands_stack, new_type);
 }
 
 /* C code section */
