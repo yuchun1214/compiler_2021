@@ -73,6 +73,7 @@
     char * get_operand_type(struct symbol_table_t * table, char *name);
 
     void assignment(struct stack_t* operands_stack, char * operator);
+	void condition(struct stack_t * operands_stack);
 
     struct stack_t operators_stack;
     struct stack_t operands_stack;
@@ -158,11 +159,11 @@ TypeName
 Statement
     : DeclarationStmt { }
 	| AssignmentStmt  { pop_operators(&operators_stack, &operands_stack); }
-    | ArithmeticStmt  { pop_operators(&operators_stack, &operands_stack); }
-    | PrintStmt { printf("PRINT %s\n", pop_operators(&operators_stack, &operands_stack)); }
+    | ArithmeticStmt  { pop_operators(&operators_stack, &operands_stack); pop_operand(&operands_stack); }
+    | PrintStmt { printf("PRINT %s\n", pop_operators(&operators_stack, &operands_stack)); pop_operand(&operands_stack); }
     | Block
-    | WhileStmt
-    | ForStmt
+    | WhileStmt { pop_operands(&operands_stack); }
+    | ForStmt { pop_operands(&operands_stack); }
     | IfStmt
 ;
 
@@ -186,7 +187,7 @@ ForClause
 ;
 
 Condition
-    : Expression { pop_operators(&operators_stack, &operands_stack); /*Expression check if bool type*/}
+    : Expression { pop_operators(&operators_stack, &operands_stack); condition(&operands_stack); pop_operand(&operands_stack);  }
     | BOOL_LIT
 ;
 
@@ -428,8 +429,9 @@ bool push_operator(struct stack_t * operators_stack, struct stack_t * operands_s
         for(i = operators_stack->_idx - 1; i >= 0; --i){
             top = _stack_top(operators_stack, struct operator_t);
             if(top._precedence >= prec){
-                printf("%s\n", top._name); 
                 pop_operator(operators_stack, operands_stack);
+                printf("%s\n", top._name); 
+
             }else
                 break;
         }
@@ -460,21 +462,32 @@ void pop_operator(struct stack_t * operators_stack, struct stack_t * operands_st
             case 4: // mul_op
                 if(strcmp(operator_top._name, "REM") == 0){
                     if(type1 == 3 || type2 == 3){
-                        printf("error:%d: invalid operation: (operator REM not defined on float)\n");
+                        printf("error:%d: invalid operation: (operator REM not defined on float)\n", yylineno);
+						type = -1;
                     }
-                }
+                }else{
+					type = type1 > type2 ? type1 : type2;
+				}
                 break;    
             case 3: // add_op
                 if(type1 < 0 || type2 < 0 || type1 != type2){
                     type = -1;
-                    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator_top._name, operand1, operand2);
+                    printf("error:%d: invalid operation: %s (mismatched types %s and %s)\n", yylineno, operator_top._name, operand2, operand1);
                 } else { //(type1 == type2)
                     type = type1;
                 }
                 break;
-            default:
+            case 0: 
+			case 1:
+				if(type1 != 1 || type2 != 1){
+					type = -1;
+					printf("error:%d: invalid operation: (operator %s not defined on %s)\n", yylineno, operator_top._name, type1 != 1 ? operand1 : operand2);
+				}else 
+					type = 1;
                 break;
-
+			default: // cmp_op
+				type = 1; // type is bool
+				break;
         }
         // if(operator_top._precedence == 3){ // arithmetic, add_op, mul_op
         //     // if (type1 >= 2 && type2 >= 2) // type1 and type2 is int or float
@@ -520,8 +533,8 @@ char * pop_operators(struct stack_t * operators_stack, struct stack_t * operands
             operators_stack->_idx -= 1;
             break;
         }
-        printf("%s\n", top._name);
         pop_operator(operators_stack, operands_stack);
+        printf("%s\n", top._name);
     }
 
     char * type = _stack_top(operands_stack,char *);
@@ -620,6 +633,13 @@ void conversion(struct stack_t * operands_stack, char * new_type){
     printf("%C to %C\n", top[0] ^ 0x20, new_type[0] ^ 0x20);
     pop_operand(operands_stack);
     push_operand(operands_stack, new_type);
+}
+
+void condition(struct stack_t * operands_stack){
+	char * top = _stack_top(operands_stack, char *);
+	if(strcmp(top, "bool") != 0){
+		printf("error:%d: non-bool (type %s) used as for condition\n", yylineno + 1, top);	
+	}
 }
 
 /* C code section */
